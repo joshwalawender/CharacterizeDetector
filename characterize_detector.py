@@ -43,6 +43,10 @@ p.add_argument("--aduthreshold", dest="aduthreshold", type=float,
 p.add_argument("--exptime", dest="exptime", type=str,
     default="EXPTIME",
     help="Header keyword for exposure time in seconds.")
+p.add_argument("--exptimefactor", dest="exptimefactor", type=float,
+    default=1,
+    help="""Multiplicative factor for EXPTIME header keyword value to convert 
+    it to seconds.""")
 p.add_argument("--imtype", dest="imtype", type=str,
     default="IMAGETYP",
     help="Header keyword for image type.")
@@ -69,6 +73,9 @@ p.add_argument("--darkfilter", dest="darkfilter", type=str,
     help="""If CCD uses a dark filter rather than an IMTYPE to distingush bias
     and dark files, set the filter keyword here which will be searched for 
     "dark".  Set to None to ignore.""")
+p.add_argument("--ext", "-e", dest="ext", type=int,
+    default=0,
+    help="FITS extension to analyze.")
 
 ## add arguments
 p.add_argument('files', nargs='*',
@@ -132,7 +139,7 @@ def determine_read_noise(ifc):
     bias_type_names = ['bias', 'dark', 'zero']
     if args.darkfilter is not "None":
         bias_type_names.append('light frame')
-    bias_match = (ifc.summary[args.exptime] < 0.001)
+    bias_match = (ifc.summary[args.exptime] < 1)
     bias_match &= np.array([t.lower() in bias_type_names\
                             for t in ifc.summary[args.imtype]])
     if args.darkfilter is not "None":
@@ -145,7 +152,8 @@ def determine_read_noise(ifc):
     for i,bias_file_name in enumerate(bias_files['file']):
         bias_file = Path(ifc.location).joinpath(bias_file_name)
         if i == 0:
-            bias0 = ccdproc.fits_ccddata_reader(bias_file, unit='adu')
+            bias0 = ccdproc.fits_ccddata_reader(bias_file, unit='adu',
+                                                ext=args.ext)
             ny, nx = bias0.data.shape
             mean, median, stddev = stats.sigma_clipped_stats(
                                          bias0.data[buf:ny-buf,buf:nx-buf],
@@ -155,7 +163,8 @@ def determine_read_noise(ifc):
             log.debug(f'  Bias (mean, med, mode, std) = {mean.value:.1f}, '\
                       f'{median.value:.1f}, {mode:d}, {stddev.value:.2f}')
         else:
-            biases.append(ccdproc.fits_ccddata_reader(bias_file, unit='adu'))
+            biases.append(ccdproc.fits_ccddata_reader(bias_file, unit='adu',
+                          ext=args.ext))
 
     log.info('  Making master bias')
     master_bias = ccdproc.combine(biases, combine='average',
@@ -189,7 +198,7 @@ def determine_read_noise(ifc):
         log.info(f'Generating plot for bias file: {bias_files[0]["file"]}')
         data = biases[0].data[buf:ny-buf,buf:nx-buf]
         std = np.std(data)
-        binwidth = 10*int(std)
+        binwidth = int(20*std)
         binsize = 1
         med = np.median(data)
         bins = [x+med for x in range(-binwidth,binwidth,binsize)]
@@ -213,7 +222,7 @@ def determine_read_noise(ifc):
         log.info(f'Generating plot for master bias')
         data = master_bias.data[buf:ny-buf,buf:nx-buf]
         std = np.std(data)
-        binwidth = 10*int(std)
+        binwidth = int(20*std)
         binsize = 1
         med = np.median(data)
         bins = [x+med for x in range(-binwidth,binwidth,binsize)]
@@ -264,7 +273,7 @@ def determine_dark_current(ifc, master_bias):
         dark_file = Path(ifc.location).joinpath(entry['file'])
         exptime = entry[args.exptime]
 
-        dark = ccdproc.fits_ccddata_reader(dark_file, unit='adu')
+        dark = ccdproc.fits_ccddata_reader(dark_file, unit='adu', ext=args.ext)
         dark_diff = ccdproc.subtract_bias(dark, master_bias)
         ny, nx = dark_diff.data.shape
         mean, median, stddev = stats.sigma_clipped_stats(
@@ -347,7 +356,7 @@ def determine_gain(ifc, master_bias, RN):
     for i,entry in enumerate(flat_files):
         flat_file = Path(ifc.location).joinpath(entry['file'])
         exptime = entry[args.exptime]
-        flat = ccdproc.fits_ccddata_reader(flat_file, unit='adu')
+        flat = ccdproc.fits_ccddata_reader(flat_file, unit='adu', ext=args.ext)
         flat = ccdproc.subtract_bias(flat, master_bias)
         flats[flat_file.name] = flat
         ny, nx = flat.data.shape
@@ -490,7 +499,15 @@ def main():
     keywords = [args.exptime, args.imtype, args.ccdtemp]
     if args.darkfilter is not "None":
         keywords.append(args.darkfilter)
-    ifc = IFC(location=files[0].parent, filenames=files, keywords=keywords)
+    ifc = IFC(location=files[0].parent, filenames=files, keywords=keywords,
+              ext=args.ext)
+
+    if args.exptimefactor != 1:
+        new_exptime = Column([t*args.exptimefactor for t in
+                              ifc.summary[args.exptime]],
+                              dtype=float, name=args.exptime)
+        ifc.summary[args.exptime] = new_exptime
+
     log.info(f'Found {len(ifc.summary)} image files')
     if args.verbose is True:
         print(ifc.summary)
