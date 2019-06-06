@@ -136,7 +136,7 @@ def determine_read_noise(ifc):
     log.info('Determining read noise')
     buf = args.trimpix
 
-    bias_type_names = ['bias', 'dark', 'zero']
+    bias_type_names = ['bias', 'dark', 'zero', 'bias frame', 'dark frame']
     if args.darkfilter is not "None":
         bias_type_names.append('light frame')
     bias_match = (ifc.summary[args.exptime] < 1)
@@ -251,7 +251,7 @@ def determine_dark_current(ifc, master_bias):
     log.info('Determining dark current')
     buf = args.trimpix
 
-    dark_type_names = ['dark']
+    dark_type_names = ['dark', 'dark frame']
     if args.darkfilter is not "None":
         dark_type_names.append('light frame')
     dark_match = (ifc.summary[args.exptime] > 0)
